@@ -1,0 +1,16 @@
+{
+  "name": "vaultsql-e2e-tests",
+  "version": "1.0.0",
+  "description": "Playwright E2E tests for VaultSQL workbench",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^22.0.0"
+  }
+}

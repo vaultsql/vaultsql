@@ -1,0 +1,154 @@
+name: vaultsql-dev
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: vaultsql_caddy_dev
+    ports:
+      - "8400:8400"
+    volumes:
+      - ./config/Caddyfile.dev:/etc/caddy/Caddyfile
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+
+  app_db:
+    image: postgres:16-alpine
+    container_name: vaultsql_app_db_dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mydb
+    volumes:
+      - app_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: vaultsql_redis_dev
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    container_name: vaultsql_api_dev
+    volumes:
+      - ./api:/app
+      - ./env.txt:/app/.env:ro
+    depends_on:
+      app_db:
+        condition: service_started
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+
+  query:
+    build:
+      context: ./query_service
+      dockerfile: Dockerfile.dev
+    container_name: vaultsql_query_dev
+    volumes:
+      - ./query_service:/app
+      - ./env.txt:/app/.env:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+
+  bastion:
+    build:
+      context: ./testing/bastion
+    container_name: vaultsql_bastion_dev
+    ports:
+      - "2222:22"
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+
+  test_postgres:
+    image: postgres:16-alpine
+    container_name: vaultsql_test_postgres_dev
+    env_file:
+      - ./env.txt
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./testing/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./testing/postgres/init.sql:/tmp/init.sql.template:ro
+      - ./testing/postgres/kitchen_sink.sql:/tmp/kitchen_sink.sql.template:ro
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  test_mysql:
+    image: mysql:8.0
+    container_name: vaultsql_test_mysql_dev
+    env_file:
+      - ./env.txt
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: mysql_demo
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./testing/mysql/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./testing/mysql/init.sql:/tmp/init.sql.template:ro
+      - ./testing/mysql/kitchen_sink.sql:/tmp/kitchen_sink.sql.template:ro
+    restart: unless-stopped
+    networks:
+      - vaultsql_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+networks:
+  vaultsql_network:
+    driver: bridge
+
+volumes:
+  app_db_data:

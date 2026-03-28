@@ -1,0 +1,14 @@
+:80 {
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+    handle /query/* {
+        uri strip_prefix /query
+        reverse_proxy query:9005
+    }
+    handle {
+        root * /srv/frontend
+        try_files {path} /index.html
+        file_server
+    }
+}

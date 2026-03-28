@@ -1,0 +1,599 @@
+import { Disclosure } from '@headlessui/react'
+import {
+  ChevronDownIcon,
+  CircleStackIcon,
+  ClockIcon,
+  LockClosedIcon,
+  LockOpenIcon,
+  MagnifyingGlassIcon,
+  PencilIcon,
+  ShieldCheckIcon,
+} from '@heroicons/react/20/solid'
+import { CircleStackIcon as CircleStackIconOutline, FunnelIcon } from '@heroicons/react/24/outline'
+import { useMemo, useState } from 'react'
+import { Badge } from '@/components/catalyst/badge'
+import { Button } from '@/components/catalyst/button'
+import { Heading } from '@/components/catalyst/heading'
+import { Input, InputGroup } from '@/components/catalyst/input'
+import { Select } from '@/components/catalyst/select'
+import { Text } from '@/components/catalyst/text'
+import { type Access, isAccessActive, isAccessPending, useUserProfiles } from '@/queries/access'
+import { type Profile, type Server, useServerProfiles, useServers } from '@/queries/servers'
+import { EmptyState, LoadingSpinner } from '@/webapp/components'
+import { RequestAccessDialog } from '@/webapp/components/RequestAccessDialog'
+import { usePageTitle } from '@/webapp/hooks'
+import {
+  getAccessLevelBadgeColor,
+  getAccessLevelLabel,
+  getEnvironmentBadgeColor,
+  getEnvironmentLabel,
+} from '@/webapp/utils/access-badges'
+
+type AccessFilter = 'all' | 'active' | 'pending' | 'no-access'
+type EnvironmentFilter = 'all' | 'production' | 'staging' | 'testing' | 'development' | 'other'
+
+export function HomePage() {
+  usePageTitle('Home')
+  const { data: accessList = [], isLoading: accessLoading, error: accessError } = useUserProfiles()
+  const { data: servers = [], isLoading: serversLoading, error: serversError } = useServers()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [accessFilter, setAccessFilter] = useState<AccessFilter>('all')
+  const [environmentFilter, setEnvironmentFilter] = useState<EnvironmentFilter>('all')
+
+  // Map of profile_id -> access (active access only)
+  const accessByProfile = useMemo(() => {
+    const map = new Map<string, Access>()
+    for (const access of accessList) {
+      if (isAccessActive(access) && !map.has(access.profile_id)) {
+        map.set(access.profile_id, access)
+      }
+    }
+    return map
+  }, [accessList])
+
+  // Map of profile_id -> pending access request
+  const pendingByProfile = useMemo(() => {
+    const map = new Map<string, Access>()
+    for (const access of accessList) {
+      if (isAccessPending(access) && !map.has(access.profile_id)) {
+        map.set(access.profile_id, access)
+      }
+    }
+    return map
+  }, [accessList])
+
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const accessCounts = useMemo(() => {
+    let active = 0
+    let pending = 0
+    for (const access of accessList) {
+      if (isAccessActive(access)) {
+        active += 1
+      } else if (isAccessPending(access)) {
+        pending += 1
+      }
+    }
+    return { active, pending }
+  }, [accessList])
+
+  const knownEnvironments = ['production', 'staging', 'testing', 'development']
+  const availableEnvironments = useMemo(() => {
+    const found = new Set<string>()
+    for (const server of servers) {
+      if (server.environment) {
+        found.add(server.environment.toLowerCase())
+      }
+    }
+    return knownEnvironments.filter((env) => found.has(env))
+  }, [servers])
+
+  const hasOtherEnvironment = useMemo(() => {
+    return servers.some((server) => {
+      if (!server.environment) return true
+      return !knownEnvironments.includes(server.environment.toLowerCase())
+    })
+  }, [servers])
+
+  const filteredServers = useMemo(() => {
+    return servers.filter((server) => {
+      if (environmentFilter !== 'all') {
+        const env = server.environment?.toLowerCase()
+        if (environmentFilter === 'other') {
+          if (env && knownEnvironments.includes(env)) return false
+        } else if (env !== environmentFilter) {
+          return false
+        }
+      }
+
+      if (normalizedSearch) {
+        const haystack = [
+          server.name,
+          server.description ?? '',
+          server.server_type ?? '',
+          server.environment ?? '',
+        ]
+          .join(' ')
+          .toLowerCase()
+        if (!haystack.includes(normalizedSearch)) return false
+      }
+
+      return true
+    })
+  }, [servers, environmentFilter, normalizedSearch])
+
+  const isLoading = accessLoading || serversLoading
+  const error = accessError ?? serversError
+
+  if (isLoading) {
+    return <LoadingSpinner />
+  }
+
+  if (error) {
+    return (
+      <div className="p-8">
+        <Heading>Home</Heading>
+        <Text className="mt-2 text-sm text-red-600">Failed to load access: {error.message}</Text>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-full">
+      {/* Minimal Header */}
+      <div className="px-6 py-8">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <Heading className="text-2xl">Database Access</Heading>
+            <Text className="mt-1 text-zinc-500 dark:text-zinc-400">
+              Connect to servers you have access to, or request access.
+            </Text>
+            <div className="mt-3 flex flex-wrap gap-2 text-sm">
+              <Badge color="zinc">{servers.length} servers</Badge>
+              <Badge color="emerald">{accessCounts.active} active access</Badge>
+              <Badge color="amber">{accessCounts.pending} pending</Badge>
+            </div>
+          </div>
+          <div className="w-full max-w-xl space-y-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <InputGroup>
+                <MagnifyingGlassIcon data-slot="icon" className="size-4" />
+                <Input
+                  type="search"
+                  placeholder="Search servers or profiles..."
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                />
+              </InputGroup>
+              <Select
+                value={accessFilter}
+                onChange={(event) => setAccessFilter(event.target.value as AccessFilter)}
+              >
+                <option value="all">All access</option>
+                <option value="active">Active access</option>
+                <option value="pending">Pending requests</option>
+                <option value="no-access">No access</option>
+              </Select>
+              <Select
+                value={environmentFilter}
+                onChange={(event) => setEnvironmentFilter(event.target.value as EnvironmentFilter)}
+              >
+                <option value="all">All environments</option>
+                {availableEnvironments.map((environment) => (
+                  <option key={environment} value={environment}>
+                    {capitalize(environment)}
+                  </option>
+                ))}
+                {hasOtherEnvironment && <option value="other">Other / Unset</option>}
+              </Select>
+            </div>
+            {(searchQuery || accessFilter !== 'all' || environmentFilter !== 'all') && (
+              <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+                <span>
+                  Showing {filteredServers.length} of {servers.length} servers
+                </span>
+                <Button
+                  plain
+                  compact
+                  onClick={() => {
+                    setSearchQuery('')
+                    setAccessFilter('all')
+                    setEnvironmentFilter('all')
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Server List */}
+      <div className="px-6 pb-10">
+        {servers.length === 0 ? (
+          <div className="rounded-lg border border-border bg-card p-8">
+            <EmptyState
+              icon={CircleStackIconOutline}
+              title="No Servers Yet"
+              message="No servers have been configured in this workspace. Contact your workspace admin to add database servers."
+            />
+          </div>
+        ) : filteredServers.length === 0 ? (
+          <div className="rounded-lg border border-border bg-card p-8">
+            <EmptyState
+              icon={FunnelIcon}
+              title="No Matches"
+              message="No servers match your current filters. Try adjusting your search or filters to see more results."
+            />
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {filteredServers.map((server) => (
+              <ServerRow
+                key={server.id}
+                server={server}
+                accessByProfile={accessByProfile}
+                pendingByProfile={pendingByProfile}
+                searchQuery={normalizedSearch}
+                accessFilter={accessFilter}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Database-specific icons as SVG components
+function MySQLIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-label="MySQL">
+      <title>MySQL</title>
+      <path d="M16.405 5.501c-.115 0-.193.014-.274.033v.013h.014c.054.104.146.18.214.273.054.107.1.214.154.32l.014-.015c.094-.066.14-.172.14-.333-.04-.047-.046-.094-.08-.14-.04-.067-.126-.1-.18-.153zM5.77 18.695h-.927a50.854 50.854 0 00-.27-4.41h-.008l-1.41 4.41H2.45l-1.4-4.41h-.01a72.892 72.892 0 00-.195 4.41H0c.055-1.966.192-3.81.41-5.53h1.15l1.335 4.064h.008l1.347-4.064h1.095c.242 2.015.384 3.86.428 5.53zm4.017-4.08c-.378 2.045-.876 3.533-1.492 4.46-.482.716-1.01 1.073-1.583 1.073-.153 0-.34-.046-.566-.138v-.494c.11.017.24.026.386.026.268 0 .483-.075.647-.222.197-.18.295-.382.295-.605 0-.155-.077-.47-.23-.944L6.23 14.615h.91l.727 2.36c.164.536.233.91.205 1.123.4-1.064.678-2.227.835-3.483zm12.325 4.08h-2.63v-5.53h.885v4.85h1.745zm-3.32.135l-1.016-.5c.09-.076.177-.158.255-.25.433-.506.648-1.258.648-2.253 0-1.83-.718-2.746-2.155-2.746-.704 0-1.254.232-1.65.697-.43.508-.646 1.256-.646 2.245 0 .972.19 1.686.574 2.14.35.41.877.615 1.583.615.264 0 .506-.033.725-.098l1.325.772.36-.622zM15.5 17.588c-.225-.36-.337-.94-.337-1.736 0-1.393.424-2.09 1.27-2.09.443 0 .77.167.977.5.224.362.336.936.336 1.723 0 1.404-.424 2.108-1.27 2.108-.445 0-.77-.167-.978-.5zm-1.658-.425c0 .47-.172.856-.516 1.156-.344.3-.803.45-1.384.45-.543 0-1.064-.172-1.573-.515l.237-.476c.438.22.833.328 1.19.328.332 0 .593-.073.783-.22a.754.754 0 00.3-.615c0-.33-.23-.61-.648-.83-.388-.197-1.002-.466-1.002-.466-.543-.282-.814-.66-.814-1.134 0-.435.155-.79.465-1.067.3-.288.7-.431 1.19-.431.456 0 .863.12 1.22.357l-.266.5c-.348-.17-.663-.254-.945-.254-.284 0-.506.074-.67.223a.69.69 0 00-.245.537c0 .285.207.517.62.697l.518.23c.328.15.59.3.785.456.336.274.503.63.503 1.067zm-4.497-1.547h-.002c0 .59-.146 1.055-.437 1.394-.3.346-.7.52-1.195.52-.576 0-1-.194-1.275-.582-.282-.395-.423-.942-.423-1.64 0-.59.14-1.054.418-1.39.287-.343.69-.515 1.207-.515.585 0 1.006.194 1.265.58.27.384.405.928.405 1.633zm-1.622-1.755c-.36 0-.64.15-.84.45-.202.3-.303.72-.303 1.26 0 .525.088.925.264 1.2.176.276.44.414.792.414.36 0 .64-.15.84-.45.202-.3.303-.72.303-1.26 0-.525-.088-.925-.264-1.2-.176-.276-.44-.414-.792-.414z" />
+    </svg>
+  )
+}
+
+function PostgreSQLIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-label="PostgreSQL">
+      <title>PostgreSQL</title>
+      <path d="M23.5594 14.7228a.5269.5269 0 00-.0563-.1191c-.139-.2632-.4768-.3418-.7837-.2803-1.2745.2547-2.3535.4602-3.2465.6211-.8930.1562-1.6104.2714-2.1668.3447-.5564.0781-.9522.1172-1.1922.1172-.0884 0-.1562-.0024-.1953-.0024-.0415 0-.0635.0049-.0762.0049l.0098.0049c.0049.0025.0098.0074.0171.0098.0073.0025.0171.0074.0268.0098.0098.0049.0196.0098.0318.0171.0122.0073.0269.0147.0415.0245.0147.0098.0318.0196.0488.032.0171.0122.0367.0269.0537.0415.0171.0147.0367.0318.0537.0488.0171.0171.0343.0367.054.054.0196.0171.0367.0391.054.0586s.0343.0439.0488.0659c.0146.0220.0269.0464.0391.0684.0123.0220.0221.0464.0321.0708.0098.0245.0172.0513.0245.0782.0073.0269.0098.0562.0123.0831.0024.0269.0024.0513.0024.0757v.0464c0 .0367-.0024.0708-.0073.1099-.0048.0391-.0097.0831-.0171.1245-.0073.0415-.0171.0806-.0268.1221-.0098.0415-.0221.0806-.0343.1196-.0122.0391-.0269.0733-.0415.1099-.0147.0367-.0319.0708-.0488.1025-.0171.0318-.0367.0611-.0562.0879-.0196.0269-.0415.0513-.0635.0733-.0219.0220-.0464.0415-.0708.0586-.0245.0171-.0513.0318-.0781.0439-.0269.0122-.0562.0220-.0855.0293-.0293.0073-.0611.0122-.0904.0147h-.0415c-.0342 0-.0733-.0024-.1147-.0073l-.1196-.0171c-.0415-.0073-.0855-.0171-.1318-.0293-.0464-.0122-.0953-.0269-.1465-.0439-.0513-.0171-.1050-.0367-.1612-.0586-.0562-.0218-.1147-.0488-.1781-.0781-.0635-.0293-.1295-.0635-.1977-.0977-.0684-.0342-.1416-.0733-.2149-1.1245l.0342.0073c.0171.0024.0513.0049.0953.0049.0464 0 .1050-.0024.1758-.0073.0709-.0048.1514-.0122.2418-.0220.0904-.0097.1880-.0244.2930-.0439.1050-.0195.2148-.0464.3296-.0757.1147-.0293.2344-.0635.3564-.1025.1221-.0391.2490-.0806.3783-.1270.1294-.0464.2588-.0977.3906-.1514.1318-.0537.2636-.1147.3955-.1758.1318-.0611.2612-.1270.3882-.1929.1270-.0659.2465-.1367.3637-.2097.1171-.0733.2221-.1465.3195-.2198.0977-.0733.1807-.1465.2492-.2149.0684-.0684.1196-.1318.1538-.1880.0098-.0171.0147-.0318.0196-.0439.0048-.0122.0073-.0196.0073-.0269v-.0073c0-.0513-.0342-.1025-.1025-.1514-.0684-.0488-.1807-.0928-.3247-.1318-.1441-.0391-.3174-.0733-.5176-.1025-.2002-.0293-.4249-.0513-.6739-.0684-.2491-.0171-.5200-.0269-.8130-.0293-.2931-.0024-.6030.0024-.9326.0147-.3298.0122-.6739.0342-1.0328.0635-.3589.0293-.7275.0684-1.1048.1147-.3772.0464-.7617.1025-1.1523.1685-.3906.0659-.7861.1416-1.1841.2295-.3979.0879-.7959.1904-1.1914.3052-.3954.1147-.7861.2441-1.1743.3858-.3881.1416-.7714.3003-1.1475.4712-.3762.1709-.7427.3564-1.0986.5566-.3559.2002-.6970.4175-1.0206.6495-.3235.2319-.6283.4786-.9131.7373-.2847.2588-.5444.5322-.7764.8179-.2319.2857-.4335.5858-.6031.8999-.1695.3142-.3052.6422-.4077.9863-.1025.3442-.1709.7031-.2051 1.0768-.0171.1855-.0245.3735-.0196.5639.0048.1904.0244.3833.0586.5786.0341.1953.0879.3930.1587.5932.0708.2002.1636.4028.2764.6079.1129.2051.2459.4125.4028.6226.1569.2101.3394.4226.5469.6373.2076.2149.4427.4322.7080.6521.2653.2198.5591.4445.8813.6714.3223.2271.6705.4564 1.0476.6863.3770.2299.7812.4615 1.2114.6958.4301.2344.8838.4713 1.3608.7109.4770.2397.9772.4810 1.4981.7251.5210.2442 1.0603.4884 1.6187.7349.5583.2466 1.1304.4957 1.7164.7471.5859.2515 1.1834.5052 1.7920.7618.6084.2567 1.2256.5162 1.8516.7786.6259.2625 1.2581.5273 1.8974.7944.6394.2673 1.2836.5369 1.9336.8086.6499.2716 1.3008.5454 1.9531.8203.6524.2749 1.3037.5508 1.9531.8281.6495.2772 1.2946.5537 1.9336.8281.6391.2744 1.2676.5469 1.8857.8164.6182.2695 1.2207.5352 1.8067.7959.5859.2607 1.1523.5156 1.6992.7656.5469.2499 1.0693.4932 1.5674.7275.4981.2344.9668.4575 1.4062.6714.4394.2139.8447.4175 1.2158.6104.3711.1929.7031.3748.9961.5469.2930.1721.5420.3320.7471.4785.2051.1465.3613.2773.4688.3906.1074.1133.1611.2051.1611.2773 0 .0269-.0024.0513-.0073.0757-.0048.0245-.0122.0464-.0220.0684z" />
+    </svg>
+  )
+}
+
+function ServerIcon({ serverType, isActive }: { serverType: string; isActive: boolean }) {
+  const activeClass = isActive
+    ? 'text-emerald-600 dark:text-emerald-400'
+    : 'text-zinc-400 dark:text-zinc-600'
+  const iconClass = `mt-0.5 h-5 w-5 flex-shrink-0 ${activeClass}`
+
+  switch (serverType.toLowerCase()) {
+    case 'mysql':
+      return <MySQLIcon className={iconClass} />
+    case 'postgres':
+    case 'postgresql':
+      return <PostgreSQLIcon className={iconClass} />
+    default:
+      return <CircleStackIcon className={iconClass} />
+  }
+}
+
+function ServerRow({
+  server,
+  accessByProfile,
+  pendingByProfile,
+  searchQuery,
+  accessFilter,
+}: {
+  server: Server
+  accessByProfile: Map<string, Access>
+  pendingByProfile: Map<string, Access>
+  searchQuery: string
+  accessFilter: AccessFilter
+}) {
+  return (
+    <Disclosure>
+      {({ open }) => (
+        <ServerRowContent
+          server={server}
+          accessByProfile={accessByProfile}
+          pendingByProfile={pendingByProfile}
+          searchQuery={searchQuery}
+          accessFilter={accessFilter}
+          open={open}
+        />
+      )}
+    </Disclosure>
+  )
+}
+
+function ServerRowContent({
+  server,
+  accessByProfile,
+  pendingByProfile,
+  searchQuery,
+  accessFilter,
+  open,
+}: {
+  server: Server
+  accessByProfile: Map<string, Access>
+  pendingByProfile: Map<string, Access>
+  searchQuery: string
+  accessFilter: AccessFilter
+  open: boolean
+}) {
+  const { data: profiles = [], isLoading } = useServerProfiles(server.id, { enabled: open })
+
+  if (!open && profiles.length === 0 && !isLoading) {
+    return (
+      <div
+        className={`group rounded-lg border border-border bg-card py-4 transition hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 ${getEnvironmentBorder(server.environment)}`}
+      >
+        <Disclosure.Button className="flex w-full items-start justify-between gap-4 px-6 text-left">
+          <ServerHeader server={server} />
+          <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="font-mono">{server.server_type}</span>
+            <ChevronDownIcon
+              className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`}
+            />
+          </div>
+        </Disclosure.Button>
+        <div className="mt-2 px-6 text-xs text-zinc-500 dark:text-zinc-400">
+          Expand to view profiles.
+        </div>
+      </div>
+    )
+  }
+
+  const filteredProfiles = profiles.filter((profile) => {
+    const hasAccess = Boolean(accessByProfile.get(profile.id))
+    const hasPending = Boolean(pendingByProfile.get(profile.id))
+
+    if (accessFilter !== 'all') {
+      if (accessFilter === 'active' && !hasAccess) return false
+      if (accessFilter === 'pending' && !hasPending) return false
+      if (accessFilter === 'no-access' && (hasAccess || hasPending)) return false
+    }
+
+    if (searchQuery) {
+      const profileHaystack = [profile.name, profile.description ?? ''].join(' ').toLowerCase()
+      if (!profileHaystack.includes(searchQuery)) return false
+    }
+
+    return true
+  })
+
+  return (
+    <div
+      className={`group rounded-lg border border-border bg-card py-4 transition hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 ${getEnvironmentBorder(server.environment)}`}
+    >
+      {/* Server Header */}
+      <div className="flex items-start justify-between gap-4 px-6">
+        <Disclosure.Button className="flex w-full items-start justify-between gap-4 text-left">
+          <ServerHeader server={server} />
+          <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <span className="font-mono">{server.server_type}</span>
+            <ChevronDownIcon
+              className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`}
+            />
+          </div>
+        </Disclosure.Button>
+      </div>
+
+      {/* Profile List */}
+      {open && (
+        <>
+          {isLoading ? (
+            <div className="mt-3 px-6 text-sm text-zinc-500">Loading profiles...</div>
+          ) : profiles.length === 0 ? (
+            <div className="mt-3 px-6 text-sm text-zinc-500">
+              No profiles configured for this server.
+            </div>
+          ) : filteredProfiles.length === 0 ? (
+            <div className="mt-3 px-6 text-sm text-zinc-500">
+              No profiles match your filters.
+            </div>
+          ) : (
+            <div className="mt-3 space-y-0.5">
+              {filteredProfiles.map((profile) => (
+                <ProfileRow
+                  key={profile.id}
+                  profile={profile}
+                  server={server}
+                  access={accessByProfile.get(profile.id)}
+                  pendingAccess={pendingByProfile.get(profile.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function ProfileRow({
+  profile,
+  server,
+  access,
+  pendingAccess,
+}: {
+  profile: Profile
+  server: Server
+  access?: Access
+  pendingAccess?: Access
+}) {
+  const [showRequestDialog, setShowRequestDialog] = useState(false)
+  const hasAccess = Boolean(access)
+  const hasPendingRequest = Boolean(pendingAccess)
+  const isServerActive = server.is_active
+
+  // Get access level icon
+  const AccessLevelIcon = () => {
+    const iconClass = 'h-4 w-4 flex-shrink-0'
+    switch (profile.access_level?.toLowerCase()) {
+      case 'readonly':
+        return <LockOpenIcon className={iconClass} />
+      case 'write':
+        return <PencilIcon className={iconClass} />
+      case 'admin':
+        return <ShieldCheckIcon className={iconClass} />
+      default:
+        return <LockOpenIcon className={iconClass} />
+    }
+  }
+
+  const status = hasAccess ? 'active' : hasPendingRequest ? 'pending' : 'none'
+  const statusBadge = status === 'active' ? (
+    <Badge color="green" className="text-xs">
+      Active
+    </Badge>
+  ) : status === 'pending' ? (
+    <Badge color="amber" className="text-xs">
+      Pending
+    </Badge>
+  ) : (
+    <Badge color="zinc" className="text-xs">
+      No access
+    </Badge>
+  )
+  const accessExpiryLabel = access?.granted_until
+    ? `Until ${formatAccessExpiry(access.granted_until)}`
+    : null
+
+  return (
+    <>
+      <div className="group/row flex items-center justify-between gap-4 px-6 py-2.5 pl-12 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/50">
+        {/* Left: Icon + Profile Info */}
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <div
+            className={
+              hasPendingRequest
+                ? 'text-amber-700 dark:text-amber-400'
+                : hasAccess
+                  ? 'text-zinc-900 dark:text-zinc-100'
+                  : 'text-zinc-400 dark:text-zinc-500'
+            }
+          >
+            <AccessLevelIcon />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-3">
+              <span
+                className={`text-sm font-medium ${
+                  hasPendingRequest
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : hasAccess
+                      ? 'text-zinc-900 dark:text-zinc-100'
+                      : 'text-zinc-400 dark:text-zinc-500'
+                }`}
+              >
+                {profile.name}
+              </span>
+              <Badge color={getAccessLevelBadgeColor(profile.access_level)} className="text-xs">
+                {getAccessLevelLabel(profile.access_level)}
+              </Badge>
+              {statusBadge}
+            </div>
+            {accessExpiryLabel && (
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                {accessExpiryLabel}
+              </span>
+            )}
+            {profile.description && (
+              <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">
+                {profile.description}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Action Button */}
+        <div className="flex-shrink-0">
+          {!isServerActive ? (
+            <Button disabled outline>
+              Inactive
+            </Button>
+          ) : hasAccess ? (
+            <Button href={`/workbench/${profile.id}`}>Connect</Button>
+          ) : hasPendingRequest ? (
+            <Button disabled outline className="text-amber-700 dark:text-amber-400">
+              <ClockIcon className="-ml-1 mr-1.5 h-4 w-4" />
+              Pending
+            </Button>
+          ) : (
+            <Button outline onClick={() => setShowRequestDialog(true)}>
+              <LockClosedIcon className="-ml-1 mr-1.5 h-4 w-4" />
+              Request
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <RequestAccessDialog
+        open={showRequestDialog}
+        onClose={() => setShowRequestDialog(false)}
+        serverId={server.id}
+        profileId={profile.id}
+        profileName={profile.name}
+        serverName={server.name}
+      />
+    </>
+  )
+}
+
+function ServerHeader({ server }: { server: Server }) {
+  return (
+    <div className="flex items-start gap-3">
+      <ServerIcon serverType={server.server_type} isActive={server.is_active} />
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+            {server.name}
+          </h3>
+          {server.environment && (
+            <Badge color={getEnvironmentBadgeColor(server.environment)} className="text-xs uppercase">
+              {getEnvironmentLabel(server.environment)}
+            </Badge>
+          )}
+          {!server.is_active && (
+            <Badge color="zinc" className="text-xs">
+              Inactive
+            </Badge>
+          )}
+        </div>
+        {server.description && (
+          <p className="mt-0.5 text-sm text-zinc-600 dark:text-zinc-400">{server.description}</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function getEnvironmentBorder(environment?: string | null) {
+  if (!environment) return ''
+  switch (environment.toLowerCase()) {
+    case 'production':
+      return 'border-l-4 border-l-red-500'
+    case 'staging':
+      return 'border-l-4 border-l-blue-400'
+    default:
+      return ''
+  }
+}
+
+function formatAccessExpiry(grantedUntil?: string | null) {
+  if (!grantedUntil) return ''
+  return new Date(grantedUntil).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+

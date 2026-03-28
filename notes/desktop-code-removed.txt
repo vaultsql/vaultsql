@@ -1,0 +1,40 @@
+Desktop Code Removed from Platform Abstraction Files
+=====================================================
+
+The following files had desktop-specific code removed when deprecating the desktop app.
+If restoring the desktop app, these files will need desktop code added back.
+
+Files Modified:
+---------------
+
+1. frontend/src/lib/endpoints.ts
+   - Removed: @tauri-apps/plugin-store imports
+   - Removed: isDesktop() function
+   - Removed: getStore() function
+   - Removed: Tauri Store logic in getApiUrl(), getQueryServiceUrl(), getWebappUrl()
+   - Removed: setApiUrl(), setQueryServiceUrl(), setWebappUrl() functions
+   - Removed: getEndpointSettings() function
+   - Now: Always uses environment variables or defaults (no Tauri Store overrides)
+
+2. frontend/src/lib/vault.ts
+   - Removed: @tauri-apps/plugin-store imports
+   - Removed: isDesktop() function
+   - Removed: getDesktopStore() function
+   - Removed: Tauri Store logic in getVaultData(), setVaultData(), clearVaultData()
+   - Now: Always uses localStorage (no Tauri Store)
+
+3. frontend/src/lib/app-context.tsx
+   - Removed: Desktop mode detection in handleAuthFailure()
+   - Removed: Dynamic import of clearDesktopAuthToken()
+   - Removed: Hash-based navigation for desktop (#/login)
+   - Now: Always uses web-style navigation and clearAuthToken()
+
+Recovery Instructions:
+----------------------
+When restoring the desktop app, check the git history for these files at the tagged commit
+to see the exact desktop-specific code that needs to be restored.
+
+Key patterns to restore:
+- isDesktop() check: window.__TAURI_INTERNALS__ !== undefined
+- Tauri Store usage: load('file.json', { autoSave: true, defaults: {} })
+- Conditional logic: if (isDesktop()) { /* Tauri Store */ } else { /* localStorage */ }

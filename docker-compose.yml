@@ -1,0 +1,91 @@
+name: vaultsql-prod
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: vaultsql_caddy
+    ports:
+      - "80:80"
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile
+      - ./frontend/dist:/srv/frontend:ro
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - vaultsql_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: vaultsql_redis
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - vaultsql_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  init:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: vaultsql_init
+    command: ./init.sh
+    volumes:
+      - ./env.txt:/app/.env:ro
+    environment:
+      - DJANGO_SETTINGS_MODULE=vaultsql.settings.prod
+    depends_on:
+      redis:
+        condition: service_started
+    restart: "no"
+    logging: *default-logging
+    networks:
+      - vaultsql_network
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: vaultsql_api
+    volumes:
+      - ./env.txt:/app/.env:ro
+    environment:
+      - DJANGO_SETTINGS_MODULE=vaultsql.settings.prod
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - vaultsql_network
+
+  query:
+    build:
+      context: ./query_service
+      dockerfile: Dockerfile
+    container_name: vaultsql_query
+    volumes:
+      - ./env.txt:/app/.env:ro
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - vaultsql_network
+
+networks:
+  vaultsql_network:
+    driver: bridge

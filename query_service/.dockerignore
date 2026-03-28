@@ -1,0 +1,21 @@
+# Test files - not needed in production image
+*_test.go
+main_test.go
+
+# Development files
+Dockerfile.dev
+.air.toml
+.env
+.env*
+tmp/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+
+# Built binaries (from .gitignore)
+main
+query-service

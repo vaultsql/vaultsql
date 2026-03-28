@@ -1,0 +1,28 @@
+# Python bytecode (already in .gitignore)
+__pycache__/
+*.pyc
+*.pyo
+
+# Testing - not needed in production image
+.pytest_cache/
+tests/
+pytest.ini
+test_*.py
+
+# Development files
+Dockerfile.dev
+.env
+.env*
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+
+# Node (email templates tooling)
+node_modules/
+package.json
+package-lock.json

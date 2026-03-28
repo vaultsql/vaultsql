@@ -1,0 +1,1 @@
+export { NewTableTab } from './NewTableTab'

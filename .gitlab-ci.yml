@@ -1,0 +1,105 @@
+stages:
+  - setup
+  - test
+  - build
+  - integration
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+# Download environment variables from Doppler
+setup:env:
+  stage: setup
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl bash gnupg
+    - curl -Ls --tlsv1.2 --proto "=https" --retry 3 https://cli.doppler.com/install.sh | sh
+  script:
+    - doppler secrets download --no-file --format env --config dev --token $DOPPLER_TOKEN > env.txt
+  artifacts:
+    paths:
+      - env.txt
+    expire_in: 1 hour
+  only:
+    - branches
+    - merge_requests
+
+# Run frontend tests via Taskfile
+test:frontend:
+  stage: test
+  image: node:20-alpine
+  needs:
+    - setup:env
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - frontend/node_modules/
+  before_script:
+    # Install Task CLI
+    - apk add --no-cache curl bash
+    - sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+  script:
+    # Run frontend tests via Taskfile (handles npm ci + test:run)
+    - task ci:test:frontend
+  only:
+    - branches
+    - merge_requests
+
+# Build frontend via Taskfile
+build:frontend:
+  stage: build
+  image: node:20-alpine
+  needs:
+    - setup:env
+    - test:frontend
+  cache:
+    key:
+      files:
+        - frontend/package-lock.json
+    paths:
+      - frontend/node_modules/
+  before_script:
+    # Install Task CLI
+    - apk add --no-cache curl bash
+    - sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+  script:
+    # Build via Taskfile (handles env copy + npm ci + build)
+    - task ci:build
+  artifacts:
+    paths:
+      - frontend/dist/
+    expire_in: 1 day
+  only:
+    - branches
+    - merge_requests
+
+# Run e2e integration tests via Taskfile
+test:e2e:
+  stage: integration
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    # Explicitly set Docker host for TLS connection
+    DOCKER_HOST: tcp://docker:2376
+    # Docker TLS settings are inherited from global variables
+  needs:
+    - setup:env
+    - build:frontend
+  before_script:
+    # Verify Docker is working
+    - docker info
+    # Install Task CLI (docker compose v2 is included in docker:24)
+    - apk add --no-cache curl bash
+    - sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+    # Verify docker compose v2 is available
+    - docker compose version
+  script:
+    # Run E2E tests via Taskfile (handles all docker compose orchestration)
+    - task ci:test:e2e
+  only:
+    - branches
+    - merge_requests

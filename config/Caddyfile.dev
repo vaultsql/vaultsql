@@ -1,0 +1,12 @@
+:8400 {
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+    handle /query/* {
+        uri strip_prefix /query
+        reverse_proxy query:9005
+    }
+    handle {
+        reverse_proxy host.docker.internal:5173
+    }
+}

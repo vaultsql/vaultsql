@@ -1,0 +1,451 @@
+version: '3'
+
+# VaultSQL Taskfile - Organized by namespace for easy discovery
+# Run 'task --list' to see all available commands
+# Namespaces: dev, frontend, ci, prod, test, build, utils
+
+tasks:
+  # ============================================================================
+  # Development Environment (dev:*)
+  # Docker-based development environment commands
+  # ============================================================================
+
+  dev:up:
+    desc: "Start all dev services in foreground - API, Query Service, Redis, Databases"
+    cmds:
+      - docker compose -f docker-compose.dev.yml up
+
+  dev:up:d:
+    desc: "Start all dev services (daemonized) - API, Query Service, Redis, Databases"
+    cmds:
+      - docker compose -f docker-compose.dev.yml up -d --wait
+      - echo "[OK] Dev containers running"
+      - echo "  * Caddy available at http://localhost:8400"
+      - echo "  * Test PostgreSQL at localhost:5433"
+      - echo "  * Test MySQL at localhost:3307"
+
+  dev:down:
+    desc: "Stop all dev services"
+    cmds:
+      - docker compose -f docker-compose.dev.yml down
+      - echo "[OK] Dev containers stopped"
+
+  dev:logs:
+    desc: "Follow logs from all dev services"
+    cmds:
+      - docker compose -f docker-compose.dev.yml logs -f
+
+  dev:setup:
+    desc: "Full dev environment setup - initialize databases, migrate, seed dev account"
+    cmds:
+      - echo "[*] Initializing demo databases..."
+      - task: dev:db:init
+      - echo "[*] Running migrations..."
+      - task: dev:migrate
+      - echo "[*] Seeding dev account..."
+      - task: dev:seed
+      - echo "[OK] Dev environment setup complete"
+
+  dev:reset:
+    desc: "Reset dev environment - stop, reinitialize databases, seed dev account"
+    cmds:
+      - echo "[*] Stopping dev services..."
+      - task: dev:down
+      - echo "[*] Reinitializing databases..."
+      - task: dev:db:init
+      - echo "[*] Starting dev services..."
+      - task: dev:up:d
+      - echo "[*] Seeding dev account..."
+      - task: dev:seed
+      - echo "[OK] Dev environment reset complete"
+
+  dev:migrate:
+    desc: "Run Django migrations in dev environment"
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec api uv run python manage.py migrate
+
+  dev:makemigrations:
+    desc: "Generate Django migrations in dev environment"
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec api uv run python manage.py makemigrations
+
+  dev:shell:
+    desc: "Access Django shell in dev container"
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec api uv run python manage.py shell
+
+  dev:db:init:
+    desc: "Reinitialize demo databases (PostgreSQL and MySQL) by recreating containers"
+    cmds:
+      - echo "Stopping and removing database containers..."
+      - docker compose -f docker-compose.dev.yml stop test_postgres test_mysql
+      - docker compose -f docker-compose.dev.yml rm -f test_postgres test_mysql
+      - echo "Starting fresh database containers..."
+      - docker compose -f docker-compose.dev.yml up -d --wait test_postgres test_mysql
+      - echo "[OK] Databases reinitialized (PostgreSQL & MySQL)"
+
+  dev:db:postgres:
+    desc: "Reinitialize PostgreSQL dev databases only"
+    cmds:
+      - echo "Stopping and removing PostgreSQL container..."
+      - docker compose -f docker-compose.dev.yml stop test_postgres
+      - docker compose -f docker-compose.dev.yml rm -f test_postgres
+      - echo "Starting fresh PostgreSQL container..."
+      - docker compose -f docker-compose.dev.yml up -d --wait test_postgres
+      - echo "[OK] PostgreSQL reinitialized (kitchen_sink, test)"
+
+  dev:db:mysql:
+    desc: "Reinitialize MySQL demo databases only"
+    cmds:
+      - echo "Stopping and removing MySQL container..."
+      - docker compose -f docker-compose.dev.yml stop test_mysql
+      - docker compose -f docker-compose.dev.yml rm -f test_mysql
+      - echo "Starting fresh MySQL container..."
+      - docker compose -f docker-compose.dev.yml up -d --wait test_mysql
+      - echo "[OK] MySQL reinitialized (kitchen_sink, test)"
+
+  dev:seed:
+    desc: "Seed configured dev accounts with 4 test servers"
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec api uv run python manage.py seed_dev --reset
+
+  dev:seed:demo:
+    desc: "Seed demo accounts and connections for testing"
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec api uv run python manage.py seed_demo --reset
+
+  dev:seed:clear:
+    desc: "Delete all workspaces and identities (requires API_DEBUG=true)"
+    cmds:
+      - docker compose -f docker-compose.dev.yml exec api uv run python manage.py clear_dev
+
+  dev:db:seed:kitchen_sink:
+    desc: "Reload kitchen_sink database with comprehensive test data (PostgreSQL & MySQL)"
+    cmds:
+      - task: dev:db:seed:kitchen_sink:postgres
+      - task: dev:db:seed:kitchen_sink:mysql
+      - echo "[OK] Kitchen sink databases reloaded"
+
+  dev:db:seed:kitchen_sink:postgres:
+    desc: "Reload PostgreSQL kitchen_sink database only"
+    cmds:
+      - echo "Reloading PostgreSQL kitchen_sink database..."
+      - |
+        docker compose -f docker-compose.dev.yml exec -T test_postgres psql -U postgres -d kitchen_sink << 'EOF'
+        -- Drop and recreate to ensure clean state
+        DROP SCHEMA public CASCADE;
+        CREATE SCHEMA public;
+        GRANT ALL ON SCHEMA public TO demo_admin;
+        GRANT ALL ON SCHEMA public TO PUBLIC;
+        EOF
+      - cat testing/postgres/kitchen_sink.sql | docker compose -f docker-compose.dev.yml exec -T test_postgres psql -U postgres -d kitchen_sink
+      - echo "[OK] PostgreSQL kitchen_sink reloaded"
+
+  dev:db:seed:kitchen_sink:mysql:
+    desc: "Reload MySQL kitchen_sink database only"
+    cmds:
+      - echo "Reloading MySQL kitchen_sink database..."
+      - |
+        docker compose -f docker-compose.dev.yml exec -T test_mysql mysql -u root -prootpass << 'EOF'
+        DROP DATABASE IF EXISTS kitchen_sink;
+        CREATE DATABASE kitchen_sink;
+        EOF
+      - cat testing/mysql/kitchen_sink.sql | docker compose -f docker-compose.dev.yml exec -T test_mysql mysql -u root -prootpass --force
+      - echo "[OK] MySQL kitchen_sink reloaded"
+
+  # ============================================================================
+  # Frontend Operations (frontend:*)
+  # React/Vite frontend development, testing, and building
+  # ============================================================================
+
+  frontend:dev:
+    desc: "Start Vite dev server (runs on host, port 5173)"
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  frontend:test:
+    desc: "Run frontend unit tests with Vitest"
+    cmds:
+      - npm --prefix frontend run test:run
+
+  frontend:test:workbench:
+    desc: "Run workbench DB adapter tests in Docker test network"
+    cmds:
+      - docker compose -f docker-compose.test.yml up -d --wait test_postgres test_mysql
+      - docker compose -f docker-compose.test.yml run --rm frontend_test_runner sh -lc "npm ci && npm run test:run -- --no-file-parallelism workbench/lib/databases"
+      - docker compose -f docker-compose.test.yml down
+
+  frontend:lint:
+    desc: "Run ESLint on frontend code"
+    dir: frontend
+    cmds:
+      - npm run lint
+
+  frontend:build:
+    desc: "Build frontend for production (output to frontend/dist)"
+    cmds:
+      - cp env.txt frontend/.env
+      - npm --prefix frontend ci
+      - npm --prefix frontend run build
+
+  # ============================================================================
+  # CI/CD Pipeline Tasks (ci:*)
+  # Tasks designed to be called from GitLab CI or run the full CI pipeline locally
+  # ============================================================================
+
+  ci:test:frontend:
+    desc: "Run frontend tests in Docker test environment with Postgres/MySQL available (CI context)"
+    cmds:
+      - docker compose -f docker-compose.test.yml down -v --remove-orphans 2>/dev/null || true
+      - docker compose -f docker-compose.test.yml up -d --wait test_postgres test_mysql frontend_test_runner
+      - docker compose -f docker-compose.test.yml exec -T frontend_test_runner sh -lc "npm ci && npm run test:run -- --no-file-parallelism"
+      - defer: docker compose -f docker-compose.test.yml down -v
+
+  ci:test:pytest:
+    desc: "Run backend pytest suite excluding integration tests (CI context)"
+    cmds:
+      - docker compose -f docker-compose.test.yml down -v --remove-orphans 2>/dev/null || true
+      - docker compose -f docker-compose.test.yml up -d --wait app_db redis api test_runner
+      - docker compose -f docker-compose.test.yml exec -T test_runner uv run python manage.py migrate --noinput
+      - docker compose -f docker-compose.test.yml exec -T test_runner uv run pytest
+      - defer: docker compose -f docker-compose.test.yml down -v
+
+  ci:test:e2e:
+    desc: "Run E2E integration tests in Docker test environment (CI context)"
+    cmds:
+      - docker compose -f docker-compose.test.yml down -v --remove-orphans 2>/dev/null || true
+      - docker compose -f docker-compose.test.yml up -d --wait
+      - docker compose -f docker-compose.test.yml exec -T test_runner uv run python manage.py migrate --noinput
+      - sleep 5
+      - docker compose -f docker-compose.test.yml exec -T test_runner uv run pytest tests/integration -m integration -v
+      - defer: docker compose -f docker-compose.test.yml down -v
+
+  ci:build:
+    desc: "Build frontend for production (CI context)"
+    cmds:
+      - task: frontend:build
+
+  ci:all:
+    desc: "Full CI pipeline - frontend tests, build, backend pytest, e2e tests"
+    cmds:
+      - echo "[*] Running frontend tests..."
+      - task: ci:test:frontend
+      - echo "[OK] Frontend tests passed"
+      - echo "[*] Building frontend..."
+      - task: ci:build
+      - echo "[OK] Frontend built successfully"
+      - echo "[*] Running backend pytest..."
+      - task: ci:test:pytest
+      - echo "[OK] Backend pytest passed"
+      - echo "[*] Running e2e integration tests..."
+      - task: ci:test:e2e
+      - echo "[OK] All CI checks passed"
+
+  # ============================================================================
+  # Production Operations (prod:*)
+  # Self-hosted EC2 deployment - no Doppler, env.txt managed manually
+  # ============================================================================
+
+  prod:setup:
+    desc: "First-time self-hosted setup - build frontend, start containers, wait for init"
+    env:
+      DOCKER_BUILDKIT: "1"
+    cmds:
+      - echo "[*] Building frontend..."
+      - task: frontend:build
+      - echo "[*] Building and starting containers..."
+      - docker compose -f docker-compose.yml up -d --build --wait
+      - echo "[OK] Self-hosted setup complete"
+      - docker compose -f docker-compose.yml ps
+
+  prod:deploy:
+    desc: "Deploy self-hosted - build frontend, rebuild and restart containers"
+    env:
+      DOCKER_BUILDKIT: "1"
+    cmds:
+      - echo "[*] Building frontend..."
+      - task: frontend:build
+      - echo "[*] Rebuilding containers..."
+      - docker compose -f docker-compose.yml up -d --build --wait
+      - echo "[OK] Deployment complete"
+      - docker compose -f docker-compose.yml ps
+
+  prod:up:
+    desc: "Start self-hosted services (daemonized)"
+    cmds:
+      - docker compose -f docker-compose.yml up -d --wait
+
+  prod:down:
+    desc: "Stop self-hosted services"
+    cmds:
+      - docker compose -f docker-compose.yml down
+
+  prod:logs:
+    desc: "Follow logs from self-hosted services"
+    cmds:
+      - docker compose -f docker-compose.yml logs -f
+
+  prod:migrate:
+    desc: "Run Django migrations in self-hosted environment"
+    cmds:
+      - docker compose -f docker-compose.yml exec api uv run python manage.py migrate
+
+  prod:shell:
+    desc: "Access Django shell in self-hosted container"
+    cmds:
+      - docker compose -f docker-compose.yml exec api uv run python manage.py shell
+
+  # ============================================================================
+  # Cloud Operations (cloud:*)
+  # Doppler-backed cloud deployment (original prod workflow)
+  # ============================================================================
+
+  cloud:env:
+    desc: "Refresh env.txt from Doppler (requires Doppler CLI setup)"
+    cmds:
+      - |
+        cat > env.txt << 'EOF'
+        # This file is autogenerated. Do not edit this file.
+        # Secrets must be added in Doppler and downloaded using 'task cloud:env'
+
+        EOF
+        doppler secrets download --no-file --format env >> env.txt
+
+  cloud:deploy:
+    desc: "Deploy to cloud - sync Doppler env, build frontend, restart containers"
+    env:
+      DOCKER_BUILDKIT: "1"
+    cmds:
+      - task: cloud:env
+      - task: frontend:build
+      - echo "Stopping old containers..."
+      - docker compose -f docker-compose.yml down
+      - echo "Building and starting new containers..."
+      - docker compose -f docker-compose.yml up -d --build --wait
+      - echo "[OK] Cloud deployment complete"
+      - docker compose -f docker-compose.yml ps
+
+  cloud:migrate:
+    desc: "Run Django migrations in cloud environment"
+    cmds:
+      - docker compose -f docker-compose.yml exec api uv run python manage.py migrate
+
+  cloud:shell:
+    desc: "Access Django shell in cloud container"
+    cmds:
+      - docker compose -f docker-compose.yml exec api uv run python manage.py shell
+
+  cloud:seed:demo:
+    desc: "Seed demo accounts and connections in cloud environment"
+    cmds:
+      - docker compose -f docker-compose.yml exec api uv run python manage.py seed_demo --reset
+
+  # ============================================================================
+  # Testing Shortcuts (test:*)
+  # Convenient aliases for running various test suites locally
+  # ============================================================================
+
+  test:frontend:
+    desc: "Run frontend unit tests (alias to frontend:test)"
+    cmds:
+      - task: frontend:test
+
+  test:workbench:
+    desc: "Run workbench DB adapter tests (alias to frontend:test:workbench)"
+    cmds:
+      - task: frontend:test:workbench
+
+  test:e2e:
+    desc: "Run E2E integration tests (alias to ci:test:e2e)"
+    cmds:
+      - task: ci:test:e2e
+
+  test:pytest:
+    desc: "Run all pytest tests in Docker test environment"
+    cmds:
+      - docker compose -f docker-compose.test.yml up -d --wait
+      - docker compose -f docker-compose.test.yml exec -T test_runner uv run python manage.py migrate --noinput
+      - docker compose -f docker-compose.test.yml exec -T test_runner uv run pytest
+      - defer: docker compose -f docker-compose.test.yml down -v
+
+  test:e2e:workbench:
+    desc: "Run Playwright workbench E2E tests (requires dev environment running)"
+    dir: e2e
+    cmds:
+      - npm ci
+      - npx playwright test
+
+  test:e2e:workbench:ui:
+    desc: "Run Playwright workbench E2E tests with UI mode"
+    dir: e2e
+    cmds:
+      - npm ci
+      - npx playwright test --ui
+
+  test:e2e:workbench:headed:
+    desc: "Run Playwright workbench E2E tests in headed mode (visible browser)"
+    dir: e2e
+    cmds:
+      - npm ci
+      - npx playwright test --headed
+
+  test:e2e:workbench:debug:
+    desc: "Run Playwright workbench E2E tests in debug mode"
+    dir: e2e
+    cmds:
+      - npm ci
+      - npx playwright test --debug
+
+  test:all:
+    desc: "Run all tests - frontend unit tests, pytest, and e2e integration tests"
+    cmds:
+      - echo "[*] Running frontend unit tests..."
+      - task: test:frontend
+      - echo "[OK] Frontend tests passed"
+      - echo "[*] Running pytest tests..."
+      - task: test:pytest
+      - echo "[OK] Pytest tests passed"
+      - echo "[*] Running e2e integration tests..."
+      - task: test:e2e
+      - echo "[OK] All tests passed"
+
+  # ============================================================================
+  # Build Tasks (build:*)
+  # Build operations for various components
+  # ============================================================================
+
+  build:emails:
+    desc: "Build email templates and sync to Django"
+    dir: frontend/emails
+    cmds:
+      - npm run build
+      - task: utils:emails:sync
+      - echo "[OK] Email templates built and synced"
+
+  # ============================================================================
+  # Utilities (utils:*)
+  # Helper commands and utilities
+  # ============================================================================
+
+  env:
+    desc: "Refresh env.txt from Doppler - alias for cloud:env (backwards compatibility)"
+    cmds:
+      - task: cloud:env
+
+  utils:neon:
+    desc: "Load restaurant & laundromat demo databases to Neon (prod demos)"
+    cmds:
+      - ./testing/postgres/load_to_neon.sh
+
+  utils:emails:preview:
+    desc: "Start email template preview server"
+    dir: frontend/emails
+    cmds:
+      - npm run preview
+
+  utils:emails:sync:
+    desc: "Sync built email templates from frontend/emails/build to Django templates directory"
+    cmds:
+      - mkdir -p api/notifications/email/templates
+      - cp frontend/emails/build/*.html api/notifications/email/templates/

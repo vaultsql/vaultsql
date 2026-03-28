@@ -1,0 +1,191 @@
+name: vaultsql-test
+
+services:
+  app_db:
+    image: postgres:16-alpine
+    container_name: vaultsql_app_db_test
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mydb
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: vaultsql_redis_test
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  test_postgres:
+    image: postgres:16-alpine
+    container_name: vaultsql_test_postgres_test
+    env_file:
+      - ./env.txt
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - ./testing/postgres/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./testing/postgres/init.sql:/tmp/init.sql.template:ro
+      - ./testing/postgres/restaurant.sql:/tmp/restaurant.sql.template:ro
+      - ./testing/postgres/laundromat.sql:/tmp/laundromat.sql.template:ro
+      - ./testing/postgres/kitchen_sink.sql:/tmp/kitchen_sink.sql.template:ro
+    networks:
+      - test_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  test_mysql:
+    image: mysql:8.0
+    container_name: vaultsql_test_mysql_test
+    env_file:
+      - ./env.txt
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: mysql_demo
+    volumes:
+      - ./testing/mysql/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./testing/mysql/init.sql:/tmp/init.sql.template:ro
+      - ./testing/mysql/kitchen_sink.sql:/tmp/kitchen_sink.sql.template:ro
+    networks:
+      - test_network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 40s
+
+  bastion:
+    build:
+      context: ./testing/bastion
+    container_name: vaultsql_bastion_test
+    networks:
+      - test_network
+
+  query:
+    build:
+      context: ./query_service
+      dockerfile: Dockerfile.dev
+    container_name: vaultsql_query_test
+    volumes:
+      - ./query_service:/app
+      - ./env.txt:/app/.env:ro
+    command: go run main.go
+    depends_on:
+      test_postgres:
+        condition: service_started
+      test_mysql:
+        condition: service_started
+    networks:
+      - test_network
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    container_name: vaultsql_api_test
+    volumes:
+      - ./api:/app
+      - ./env.txt:/app/.env:ro
+    command: uv run python manage.py runserver 0.0.0.0:8000
+    depends_on:
+      app_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - test_network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect((\"localhost\", 8000))'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  test_runner:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    container_name: vaultsql_test_runner
+    volumes:
+      - ./api:/app
+      - ./env.txt:/app/.env:ro
+    command: tail -f /dev/null
+    depends_on:
+      api:
+        condition: service_healthy
+      query:
+        condition: service_started
+      test_postgres:
+        condition: service_started
+      test_mysql:
+        condition: service_started
+      bastion:
+        condition: service_started
+    networks:
+      - test_network
+
+  frontend_test_runner:
+    image: node:20-bookworm
+    container_name: vaultsql_frontend_test_runner
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - ./env.txt:/app/.env:ro
+    environment:
+      NODE_ENV: test
+      TEST_PG_HOST: test_postgres
+      TEST_PG_PORT: "5432"
+      TEST_PG_DATABASE: postgres
+      TEST_PG_USER: postgres
+      TEST_PG_PASSWORD: postgres
+      TEST_MYSQL_HOST: test_mysql
+      TEST_MYSQL_PORT: "3306"
+      TEST_MYSQL_DATABASE: mysql_demo
+      TEST_MYSQL_USER: root
+      TEST_MYSQL_PASSWORD: rootpass
+    command: tail -f /dev/null
+    depends_on:
+      test_postgres:
+        condition: service_started
+      test_mysql:
+        condition: service_started
+    networks:
+      - test_network
+
+networks:
+  test_network:
+    driver: bridge
+
+volumes:
+  frontend_node_modules:

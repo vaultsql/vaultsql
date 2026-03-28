@@ -1,0 +1,1 @@
+export { postgresAdapterFactory } from './adapter'

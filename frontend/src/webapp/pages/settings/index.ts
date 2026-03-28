@@ -1,0 +1,7 @@
+export { AccessRequestsPage } from './AccessRequestsPage'
+export { AuditSettingsPage } from './AuditSettingsPage'
+export { KeyResetPage } from './KeyResetPage'
+export { PersonalProfilePage } from './PersonalProfilePage'
+export { SettingsLayout } from './SettingsLayout'
+export { VaultKeyPage } from './VaultKeyPage'
+export { WorkspaceDetailsPage } from './WorkspaceDetailsPage'

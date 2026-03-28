@@ -1,0 +1,340 @@
+import {
+  ArrowRightStartOnRectangleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  Cog8ToothIcon,
+  LightBulbIcon,
+  PlusIcon,
+  UserIcon,
+} from '@heroicons/react/16/solid'
+import {
+  HomeIcon,
+  InboxIcon,
+  QuestionMarkCircleIcon,
+  ServerIcon,
+  UsersIcon,
+} from '@heroicons/react/20/solid'
+import { useQueryClient } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
+import { useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Avatar } from '@/components/catalyst/avatar'
+import {
+  Dropdown,
+  DropdownButton,
+  DropdownDivider,
+  DropdownItem,
+  DropdownLabel,
+  DropdownMenu,
+} from '@/components/catalyst/dropdown'
+import { Navbar, NavbarItem, NavbarSection, NavbarSpacer } from '@/components/catalyst/navbar'
+import {
+  Sidebar,
+  SidebarBody,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarHeading,
+  SidebarItem,
+  SidebarLabel,
+  SidebarSection,
+  SidebarSpacer,
+} from '@/components/catalyst/sidebar'
+import { SidebarLayout } from '@/components/catalyst/sidebar-layout'
+import { useAppContext } from '@/lib/app-context'
+import { clearAuthToken, setAuthToken } from '@/lib/auth'
+import { useIdentityWorkspaceLogin, useIdentityWorkspaces } from '@/queries/identity'
+import { usePendingAccessRequests } from '@/queries/access'
+import { usePendingKeys } from '@/queries/keys'
+import { useServers } from '@/queries/servers'
+import { useIsAdmin, useLogout, useUser } from '@/queries/user'
+import { AppErrorBoundary } from './AppErrorBoundary'
+import { VaultStatusBadge } from './VaultStatusBadge'
+
+interface AppLayoutProps {
+  children: ReactNode
+}
+
+export function AppLayout({ children }: AppLayoutProps) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const queryClient = useQueryClient()
+  const { clearVault } = useAppContext()
+  const { data: user } = useUser()
+  const { data: servers } = useServers()
+  const logout = useLogout()
+  const isAdmin = useIsAdmin()
+  const { data: identityWorkspaces, isLoading: isIdentityWorkspacesLoading } =
+    useIdentityWorkspaces()
+  const workspaceLogin = useIdentityWorkspaceLogin()
+  const [switchError, setSwitchError] = useState('')
+  const [switchingWorkspaceId, setSwitchingWorkspaceId] = useState<string | null>(null)
+
+  // Fetch pending counts for inbox badge (only for admins)
+  const { data: pendingAccessRequests } = usePendingAccessRequests()
+  const { data: pendingKeys } = usePendingKeys()
+  const pendingCount =
+    (pendingAccessRequests?.length || 0) + (pendingKeys?.length || 0)
+
+  const handleLogout = async () => {
+    try {
+      await logout.mutateAsync()
+    } catch (error) {
+      console.error('Logout failed:', error)
+    } finally {
+      clearAuthToken()
+      await clearVault()
+      queryClient.clear()
+      navigate('/login')
+    }
+  }
+
+  const userName = user?.user.name || ''
+  const userEmail = user?.user.email || ''
+  const workspaceName = user?.workspace.name || ''
+  const workspaceInitial = workspaceName ? workspaceName.charAt(0).toUpperCase() : ''
+  const userInitial = userName ? userName.charAt(0).toUpperCase() : ''
+  const workspaceId = user?.workspace.id
+  const switcherWorkspaces = useMemo(() => {
+    if (!identityWorkspaces) return []
+    return identityWorkspaces.slice().sort((a, b) => a.name.localeCompare(b.name))
+  }, [identityWorkspaces])
+
+  // Helper to check if a path is current
+  const isCurrent = (path: string) => {
+    if (path === '/') {
+      return location.pathname === '/'
+    }
+    return location.pathname.startsWith(path)
+  }
+
+  const handleWorkspaceSwitch = async (targetWorkspaceId: string) => {
+    if (!targetWorkspaceId || targetWorkspaceId === workspaceId) return
+    setSwitchError('')
+    setSwitchingWorkspaceId(targetWorkspaceId)
+    try {
+      const response = await workspaceLogin.mutateAsync({ workspaceId: targetWorkspaceId })
+      setAuthToken(response.token)
+      await clearVault()
+      queryClient.clear()
+      navigate('/')
+    } catch (error) {
+      setSwitchError(error instanceof Error ? error.message : 'Failed to switch workspace')
+    } finally {
+      setSwitchingWorkspaceId(null)
+    }
+  }
+
+  return (
+    <SidebarLayout
+      navbar={
+        <Navbar>
+          <NavbarSpacer />
+          <NavbarSection>
+            <Dropdown>
+              <DropdownButton as={NavbarItem}>
+                <Avatar initials={userInitial} square />
+              </DropdownButton>
+              <DropdownMenu className="min-w-64" anchor="bottom end">
+                <DropdownItem href="/profile">
+                  <UserIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Profile
+                  </span>
+                </DropdownItem>
+                <DropdownItem href="/settings/personal/profile">
+                  <Cog8ToothIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Settings
+                  </span>
+                </DropdownItem>
+                <DropdownDivider />
+                <DropdownItem href="/share-feedback">
+                  <LightBulbIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Share feedback
+                  </span>
+                </DropdownItem>
+                <DropdownDivider />
+                <DropdownItem onClick={handleLogout}>
+                  <ArrowRightStartOnRectangleIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Sign out
+                  </span>
+                </DropdownItem>
+              </DropdownMenu>
+            </Dropdown>
+          </NavbarSection>
+        </Navbar>
+      }
+      sidebar={
+        <Sidebar>
+          <SidebarHeader>
+            <Dropdown>
+              <DropdownButton as={SidebarItem} className="lg:mb-2.5">
+                <Avatar initials={workspaceInitial} />
+                <SidebarLabel>{workspaceName}</SidebarLabel>
+                <ChevronDownIcon />
+              </DropdownButton>
+              <DropdownMenu className="min-w-80 lg:min-w-64" anchor="bottom start">
+                <div className="col-span-full grid grid-cols-[1fr_auto] gap-x-12 px-3.5 pt-2 pb-1 text-sm/5 font-medium text-zinc-500 sm:px-3 sm:text-xs/5 dark:text-zinc-400">
+                  Workspaces
+                </div>
+                {isIdentityWorkspacesLoading && (
+                  <DropdownItem disabled>
+                    <DropdownLabel className="text-sm/6 text-zinc-500">
+                      Loading workspaces...
+                    </DropdownLabel>
+                  </DropdownItem>
+                )}
+                {!isIdentityWorkspacesLoading && switcherWorkspaces.length === 0 && (
+                  <DropdownItem disabled>
+                    <DropdownLabel className="text-sm/6 text-zinc-500">
+                      No workspaces available
+                    </DropdownLabel>
+                  </DropdownItem>
+                )}
+                {switcherWorkspaces.map((workspace) => {
+                  const isCurrentWorkspace = workspaceId === workspace.id
+                  const isSwitching = switchingWorkspaceId === workspace.id
+                  return (
+                    <DropdownItem
+                      key={workspace.id}
+                      onClick={() => handleWorkspaceSwitch(workspace.id)}
+                      disabled={isCurrentWorkspace || isSwitching || workspaceLogin.isPending}
+                    >
+                      <DropdownLabel
+                        className={`text-sm/6 text-zinc-950 dark:text-white ${
+                          isCurrentWorkspace ? 'font-semibold' : ''
+                        }`}
+                      >
+                        {workspace.name}
+                      </DropdownLabel>
+                    </DropdownItem>
+                  )
+                })}
+                {switchError && (
+                  <DropdownItem disabled>
+                    <DropdownLabel className="text-sm/6 text-red-500">{switchError}</DropdownLabel>
+                  </DropdownItem>
+                )}
+                {isAdmin && (
+                  <>
+                    <DropdownDivider />
+                    <DropdownItem href="/settings/admin/workspace">
+                      <Cog8ToothIcon />
+                      <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                        Workspace Settings
+                      </span>
+                    </DropdownItem>
+                  </>
+                )}
+              </DropdownMenu>
+            </Dropdown>
+          </SidebarHeader>
+          <SidebarBody>
+            <SidebarSection>
+              <SidebarItem href="/" current={isCurrent('/')}>
+                <HomeIcon />
+                <SidebarLabel>Home</SidebarLabel>
+              </SidebarItem>
+              {isAdmin && (
+                <SidebarItem href="/inbox" current={isCurrent('/inbox')}>
+                  <InboxIcon />
+                  <SidebarLabel>Inbox</SidebarLabel>
+                  {pendingCount > 0 && (
+                    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-medium text-white">
+                      {pendingCount}
+                    </span>
+                  )}
+                </SidebarItem>
+              )}
+              {isAdmin && (
+                <SidebarItem href="/members" current={isCurrent('/members')}>
+                  <UsersIcon />
+                  <SidebarLabel>Members</SidebarLabel>
+                </SidebarItem>
+              )}
+            </SidebarSection>
+            {isAdmin && (
+              <SidebarSection className="max-lg:hidden">
+                <SidebarHeading>Servers</SidebarHeading>
+                {servers?.map((server) => (
+                  <SidebarItem
+                    key={server.id}
+                    href={`/server/${server.id}`}
+                    current={location.pathname === `/server/${server.id}`}
+                  >
+                    <ServerIcon />
+                    <SidebarLabel>{server.name}</SidebarLabel>
+                  </SidebarItem>
+                ))}
+                <SidebarItem href="/server/add" current={isCurrent('/server/add')}>
+                  <PlusIcon />
+                  <SidebarLabel>Add Server</SidebarLabel>
+                </SidebarItem>
+              </SidebarSection>
+            )}
+            <SidebarSpacer />
+            <SidebarSection>
+              <VaultStatusBadge />
+            </SidebarSection>
+            <SidebarSection>
+              <SidebarItem href="/support" current={isCurrent('/support')}>
+                <QuestionMarkCircleIcon />
+                <SidebarLabel>Support</SidebarLabel>
+              </SidebarItem>
+            </SidebarSection>
+          </SidebarBody>
+          <SidebarFooter className="max-lg:hidden">
+            <Dropdown>
+              <DropdownButton as={SidebarItem}>
+                <span className="flex min-w-0 items-center gap-3">
+                  <Avatar initials={userInitial} className="size-10" square />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm/5 font-medium text-zinc-950 dark:text-white">
+                      {userName}
+                    </span>
+                    <span className="block truncate text-xs/5 font-normal text-zinc-500 dark:text-zinc-400">
+                      {userEmail}
+                    </span>
+                  </span>
+                </span>
+                <ChevronUpIcon />
+              </DropdownButton>
+              <DropdownMenu className="min-w-64" anchor="top start">
+                <DropdownItem href="/profile">
+                  <UserIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Profile
+                  </span>
+                </DropdownItem>
+                <DropdownItem href="/settings/personal/profile">
+                  <Cog8ToothIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Settings
+                  </span>
+                </DropdownItem>
+                <DropdownDivider />
+                <DropdownItem href="/share-feedback">
+                  <LightBulbIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Share feedback
+                  </span>
+                </DropdownItem>
+                <DropdownDivider />
+                <DropdownItem onClick={handleLogout}>
+                  <ArrowRightStartOnRectangleIcon />
+                  <span className="col-start-2 row-start-1 text-sm/6 text-zinc-950 dark:text-white">
+                    Sign out
+                  </span>
+                </DropdownItem>
+              </DropdownMenu>
+            </Dropdown>
+          </SidebarFooter>
+        </Sidebar>
+      }
+    >
+      <AppErrorBoundary>{children}</AppErrorBoundary>
+    </SidebarLayout>
+  )
+}

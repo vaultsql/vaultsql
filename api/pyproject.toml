@@ -1,0 +1,36 @@
+[project]
+name = "vaultsql"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.0",
+    "python-dotenv>=1.0.0",
+    "celery>=5.6.0",
+    "redis>=7.1.0",
+    "django-cors-headers>=4.9.0",
+    "pydantic[email]>=2.12.5",
+    "django-ninja>=1.3.0",
+    "cryptography>=46.0.3",
+    "resend>=2.8.0",
+    "gunicorn>=23.0.0",
+    "django-celery-beat",
+    "sentry-sdk[django]>=2.48.0",
+    "logtail-python>=0.3.4",
+    "httpx>=0.28.0",
+    "psycopg[binary]>=3.3.2",
+    "mnemonic>=0.21",
+    "free-email-domains>=1.0.1",
+    "boto3>=1.35.0",
+    "pillow>=11.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-django>=4.11.1",
+]
+
+[tool.uv.sources]
+django-celery-beat = { git = "https://github.com/celery/django-celery-beat.git" }

@@ -1,0 +1,170 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  setup-env:
+    name: Setup env
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write env.txt from GitHub secret
+        if: ${{ secrets.CI_ENV_FILE != '' }}
+        env:
+          CI_ENV_FILE: ${{ secrets.CI_ENV_FILE }}
+        run: printf '%s' "$CI_ENV_FILE" > env.txt
+
+      - name: Install Doppler CLI
+        if: ${{ secrets.CI_ENV_FILE == '' && secrets.DOPPLER_TOKEN != '' }}
+        run: curl -Ls --tlsv1.2 --proto '=https' --retry 3 https://cli.doppler.com/install.sh | sh
+
+      - name: Download env.txt from Doppler
+        if: ${{ secrets.CI_ENV_FILE == '' && secrets.DOPPLER_TOKEN != '' }}
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: doppler secrets download --no-file --format env --config dev --token "$DOPPLER_TOKEN" > env.txt
+
+      - name: Validate CI env source
+        if: ${{ secrets.CI_ENV_FILE == '' && secrets.DOPPLER_TOKEN == '' }}
+        run: |
+          echo 'CI requires either a CI_ENV_FILE secret or a DOPPLER_TOKEN secret.' >&2
+          exit 1
+
+      - name: Upload env artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: env
+          path: env.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  frontend-test:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    needs: setup-env
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download env artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: env
+          path: .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Verify Docker Compose
+        run: docker compose version
+
+      - name: Run frontend tests
+        run: task ci:test:frontend
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    needs:
+      - setup-env
+      - frontend-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download env artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: env
+          path: .
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Build frontend
+        run: task ci:build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  backend-test:
+    name: Backend pytest
+    runs-on: ubuntu-latest
+    needs:
+      - setup-env
+      - frontend-build
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download env artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: env
+          path: .
+
+      - name: Install Task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Verify Docker Compose
+        run: docker compose version
+
+      - name: Run backend pytest
+        run: task ci:test:pytest
+
+  integration-test:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    needs:
+      - setup-env
+      - frontend-build
+      - backend-test
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download env artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: env
+          path: .
+
+      - name: Install Task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Verify Docker Compose
+        run: docker compose version
+
+      - name: Run integration tests
+        run: task ci:test:e2e

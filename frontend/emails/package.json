@@ -1,0 +1,24 @@
+{
+  "name": "@vaultsql/emails",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsx build.ts",
+    "build:sync": "npm run build && ../../scripts/sync-email-templates.sh",
+    "dev": "tsx build.ts --watch",
+    "preview": "email dev --dir templates"
+  },
+  "dependencies": {
+    "@react-email/components": "^0.0.25",
+    "@react-email/render": "^1.0.1",
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/react": "^19.0.5",
+    "react-email": "^3.0.3",
+    "tsx": "^4.19.2",
+    "typescript": "~5.6.0"
+  }
+}

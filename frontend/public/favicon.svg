@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VaultSQL">
+  <defs>
+    <linearGradient id="dbBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#0b4f4a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" fill="#f1f5f4"/>
+  <ellipse cx="32" cy="14" rx="20" ry="8" fill="#134e4a"/>
+  <rect x="12" y="14" width="40" height="28" fill="url(#dbBody)"/>
+  <ellipse cx="32" cy="42" rx="20" ry="8" fill="#0f766e"/>
+  <ellipse cx="32" cy="14" rx="20" ry="8" fill="none" stroke="#0b3b38" stroke-width="2"/>
+  <ellipse cx="32" cy="42" rx="20" ry="8" fill="none" stroke="#0b3b38" stroke-width="2"/>
+  <path d="M22 26l10 10 10-10" fill="none" stroke="#e6fffb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
