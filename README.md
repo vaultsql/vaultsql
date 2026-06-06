@@ -109,4 +109,4 @@ All services read from `env.txt` at the repo root. This file is mounted into con
 
 ## License
 
-Proprietary - All rights reserved
+MIT
